@@ -1,3 +1,4 @@
+
 #include "lcd_spi_driver_t4.hpp"
 
 static volatile short _lcd_spi_dma_dummy_rx;
@@ -28,7 +29,6 @@ lcd_spi_driver_t4::lcd_spi_driver_t4(uint32_t frequency, uint8_t cs, uint8_t rs,
     _buffer = NULL;	
     _dma_state = 0;
 }
-
 
 void lcd_spi_driver_t4::dma_interrupt(void) {
     if (_dmaActiveDisplay[0]) {
@@ -79,16 +79,8 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 
 			_pimxrt_spi->CR = LPSPI_CR_MEN | LPSPI_CR_RRF | LPSPI_CR_RTF;   // actually clear both...
 			_pimxrt_spi->SR = 0x3f00;	// clear out all of the other status...
-
-
-//			maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));	// output Command with 8 bits
-			// Serial.printf("Output NOP (SR %x CR %x FSR %x FCR %x %x TCR:%x)\n", _pimxrt_spi->SR, _pimxrt_spi->CR, _pimxrt_spi->FSR, 
-			//	_pimxrt_spi->FCR, _spi_fcr_save, _pimxrt_spi->TCR);
 			_pending_rx_count = 0;	// Make sure count is zero
-//			writecommand_last(SSD1351_CMD_NOP);
-
-			// Serial.println("Do End transaction");
-			end_transaction();
+            end_transaction();
 			_dma_state &= ~(LCD_SPI_DMA_ACTIVE | LCD_SPI_DMA_FINISH);
 			_dmaActiveDisplay[_spi_num] = 0;	// We don't have a display active any more... 
 
@@ -184,15 +176,7 @@ void lcd_spi_driver_t4::wait_transmit_complete(void) {
     }
     _pimxrt_spi->CR = LPSPI_CR_MEN | LPSPI_CR_RRF;  // Clear RX FIFO
 }
-void lcd_spi_driver_t4::begin_transaction(void) {
-    if (hwSPI) _pspi->beginTransaction(_spiSettings);
-    if (_csport) DIRECT_WRITE_LOW(_csport, _cspinmask);
-}
 
-void lcd_spi_driver_t4::end_transaction(void) {
-    if (_csport) DIRECT_WRITE_HIGH(_csport, _cspinmask);
-    if (hwSPI) _pspi->endTransaction();
-}
 
 #define TCR_MASK (LPSPI_TCR_PCS(3) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_CONT | LPSPI_TCR_RXMSK)
 
@@ -239,88 +223,50 @@ void lcd_spi_driver_t4::spi_write(uint8_t c)
 		}
 	}
 }
-
-void lcd_spi_driver_t4::write_command(uint8_t c)
+void lcd_spi_driver_t4::spi_write16(uint16_t c)
 {
-	if (hwSPI) {
-		maybe_update_tcr(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
-		_pimxrt_spi->TDR = c;
-		_pending_rx_count++;	//
-		wait_fifo_not_full();
+	if (_pspi) {
+		_pspi->transfer16(c);
 	} else {
-		DIRECT_WRITE_LOW(_dcport, _dcpinmask);
-		spi_write(c);
+		// Fast SPI bitbang swiped from LPD8806 library
+		for(uint16_t bit = 0x8000; bit; bit >>= 1) {
+			if(c & bit) DIRECT_WRITE_HIGH(_mosiport, _mosipinmask);
+			else        DIRECT_WRITE_LOW(_mosiport, _mosipinmask);
+			DIRECT_WRITE_HIGH(_sckport, _sckpinmask);
+			asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
+			DIRECT_WRITE_LOW(_sckport, _sckpinmask);
+		}
 	}
 }
 
-void lcd_spi_driver_t4::write_command_last(uint8_t c)
-{
-	if (hwSPI) {
-		maybe_update_tcr(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
-		_pimxrt_spi->TDR = c;
-		_pending_rx_count++;	//
-		wait_transmit_complete();
-	} else {
-		DIRECT_WRITE_LOW(_dcport, _dcpinmask);
-		spi_write(c);
-	}
-
-}
-
-void lcd_spi_driver_t4::write_data(uint8_t c)
-{
-	if (hwSPI) {
-		maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
-		_pimxrt_spi->TDR = c;
-		_pending_rx_count++;	//
-		wait_transmit_complete();
-	} else {
-		DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
-		spi_write(c);
-	}
-} 
-
-void lcd_spi_driver_t4::write_data_last(uint8_t c)
-{
-	if (hwSPI) {
-		maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
-		_pimxrt_spi->TDR = c;
-		_pending_rx_count++;	//
-		wait_transmit_complete();
-	} else {
-		DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
-		spi_write(c);
-	}
-} 
 
 void lcd_spi_driver_t4::begin(void) {
     if (_sid == (uint8_t)-1) _sid = 11;
 	if (_sclk == (uint8_t)-1) _sclk = 13;
 	if (SPI.pinIsMOSI(_sid) && SPI.pinIsSCK(_sclk)) {
-		Serial.println("SSD1351 - Hardware SPI");
+		Serial.println("LCD SPI Driver - Hardware SPI");
 		_pspi = &SPI;
 		_spi_num = 0;          // Which buss is this spi on? 
 		_pimxrt_spi = &IMXRT_LPSPI4_S;  // Could hack our way to grab this from SPI object, but...
 
 	} else if (SPI1.pinIsMOSI(_sid) && SPI1.pinIsSCK(_sclk)) {
-		Serial.println("SSD1351 - Hardware SPI1");
+		Serial.println("LCD SPI Driver - Hardware SPI1");
 		_pspi = &SPI1;
 		_spi_num = 1;          // Which buss is this spi on? 
 		_pimxrt_spi = &IMXRT_LPSPI3_S;
 	} else if (SPI2.pinIsMOSI(_sid) && SPI2.pinIsSCK(_sclk)) {
-		Serial.println("SSD1351 - Hardware SPI2");
+		Serial.println("LCD SPI Driver - Hardware SPI2");
 		_pspi = &SPI2;
 		_spi_num = 2;          // Which buss is this spi on? 
 		_pimxrt_spi = &IMXRT_LPSPI1_S;
 	} else {
 		_pspi = nullptr;
 	}
-
+    _spiSettings = SPISettings(_freq, MSBFIRST, SPI_MODE0);
 	if (_pspi) {
 		hwSPI = true;
 		_pspi->begin();
 		_pending_rx_count = 0;
-		_spiSettings = SPISettings(_freq, MSBFIRST, SPI_MODE0);
 		_pspi->beginTransaction(_spiSettings); // Should have our settings. 
 		_pspi->transfer(0);	// hack to see if it will actually change then...
 		_pspi->endTransaction();

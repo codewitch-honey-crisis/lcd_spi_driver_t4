@@ -17,7 +17,7 @@
  ****************************************************/
 #pragma once
 #include <SPI.h>
-typedef void (*lcd_spi_on_flush_complete_callback_t)(void* state);
+typedef void (*lcd_spi_on_flush_complete_callback_t)(void *state);
 #define LCD_SPI_DMA_TCR_MASK (LPSPI_TCR_PCS(3) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_CONT | LPSPI_TCR_RXMSK)
 #define LCD_SPI_DMA_BUFFER_SIZE 512
 typedef struct {
@@ -57,7 +57,7 @@ class lcd_spi_driver_t4 {
     uint8_t _rotation;
     uint32_t ctar;
     static lcd_spi_driver_t4 *_dmaActiveDisplay[3];  // Use pointer to this as a way to get back to object...
-    static lcd_spi_dma_data_t _dma_data[3];  // one structure for each SPI bus...
+    static lcd_spi_dma_data_t _dma_data[3];          // one structure for each SPI bus...
     // try work around DMA memory cached.  So have a couple of buffers we copy frame buffer into
     // as to move it out of the memory that is cached...
     volatile uint32_t _dma_pixel_index = 0;
@@ -67,15 +67,15 @@ class lcd_spi_driver_t4 {
     uint32_t _spi_fcr_save;  // save away previous FCR register value
     lcd_spi_on_flush_complete_callback_t _on_transfer_complete = nullptr;
     void *_on_transfer_complete_state = nullptr;
-    
 
-    inline void DIRECT_WRITE_LOW(volatile uint32_t* base, uint32_t mask) __attribute__((always_inline)) {
+    inline void DIRECT_WRITE_LOW(volatile uint32_t *base, uint32_t mask) __attribute__((always_inline)) {
         *(base + 34) = mask;
     }
-    inline void DIRECT_WRITE_HIGH(volatile uint32_t* base, uint32_t mask) __attribute__((always_inline)) {
+    inline void DIRECT_WRITE_HIGH(volatile uint32_t *base, uint32_t mask) __attribute__((always_inline)) {
         *(base + 33) = mask;
     }
     void spi_write(uint8_t value);
+    void spi_write16(uint16_t value);
     void wait_transmit_complete(void);
     void wait_fifo_not_full(void);
     void maybe_update_tcr(uint32_t requested_tcr_state);
@@ -84,23 +84,92 @@ class lcd_spi_driver_t4 {
     static void dma_interrupt2(void);
     void init_dma_settings(void);
     void process_dma_interrupt(void);
+
    protected:
-    void begin_transaction(void);
-    void end_transaction(void);
-    void write_command(uint8_t cmd);
-    void write_command_last(uint8_t cmd);
-    void write_data(uint8_t data);
-    void write_data_last(uint8_t data);
-    lcd_spi_driver_t4(uint32_t frequency,uint8_t CS, uint8_t RS, uint8_t SID, uint8_t SCLK, uint8_t RST = -1);
-    lcd_spi_driver_t4(uint32_t frequency,uint8_t CS, uint8_t RS, uint8_t RST = -1);
-    
+    inline void begin_transaction(void) __attribute__((always_inline)) {
+        if (hwSPI) _pspi->beginTransaction(_spiSettings);
+        if (_csport) DIRECT_WRITE_LOW(_csport, _cspinmask);
+    }
+    inline void end_transaction(void) __attribute__((always_inline)) {
+        if (_csport) DIRECT_WRITE_HIGH(_csport, _cspinmask);
+        if (hwSPI) _pspi->endTransaction();
+    }
+    inline void write_command(uint8_t cmd) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
+            _pimxrt_spi->TDR = cmd;
+            _pending_rx_count++;  //
+            wait_fifo_not_full();
+        } else {
+            DIRECT_WRITE_LOW(_dcport, _dcpinmask);
+            spi_write(cmd);
+        }
+    }
+    inline void write_command_last(uint8_t cmd) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
+            _pimxrt_spi->TDR = cmd;
+            _pending_rx_count++;  //
+            wait_transmit_complete();
+        } else {
+            DIRECT_WRITE_LOW(_dcport, _dcpinmask);
+            spi_write(cmd);
+        }
+    }
+    inline void write_data(uint8_t data) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+            _pimxrt_spi->TDR = data;
+            _pending_rx_count++;  //
+            wait_fifo_not_full();
+        } else {
+            DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+            spi_write(data);
+        }
+    }
+    inline void write_data_last(uint8_t data) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+            _pimxrt_spi->TDR = data;
+            _pending_rx_count++;  //
+            wait_transmit_complete();
+        } else {
+            DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+            spi_write(data);
+        }
+    }
+    inline void write_data16(uint16_t data) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
+            _pimxrt_spi->TDR = data;
+            _pending_rx_count++;  //
+            wait_fifo_not_full();
+        } else {
+            DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+            spi_write16(data);
+        }
+    }
+    inline void write_data16_last(uint16_t data) __attribute__((always_inline)) {
+        if (hwSPI) {
+            maybe_update_tcr(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15));
+            _pimxrt_spi->TDR = data;
+            _pending_rx_count++;  //
+            wait_transmit_complete();
+        } else {
+            DIRECT_WRITE_HIGH(_dcport, _dcpinmask);
+            spi_write16(data);
+        }
+    }
+    lcd_spi_driver_t4(uint32_t frequency, uint8_t CS, uint8_t RS, uint8_t SID, uint8_t SCLK, uint8_t RST = -1);
+    lcd_spi_driver_t4(uint32_t frequency, uint8_t CS, uint8_t RS, uint8_t RST = -1);
+
     virtual void initialize(void) = 0;
     virtual void write_address_window(int x1, int y1, int x2, int y2) = 0;
     virtual void set_rotation(int rotation) = 0;
-    
+
    public:
     void begin(void);
     void rotation(int value);
-    void on_flush_complete_callback(lcd_spi_on_flush_complete_callback_t callback, void* state = nullptr);
-    bool flush(int x1, int y1, int x2, int y2, const void* bitmap);
+    void on_flush_complete_callback(lcd_spi_on_flush_complete_callback_t callback, void *state = nullptr);
+    bool flush(int x1, int y1, int x2, int y2, const void *bitmap);
 };
