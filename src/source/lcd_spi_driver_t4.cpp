@@ -96,8 +96,15 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 	}
 
 	if (still_more_dma) {
+        size_t to_copy = _dma_buffer_size;
+        size_t remaining_words = _count_words - _dma_pixel_index;
+        bool done = false;
+        if (to_copy > remaining_words) {
+            to_copy = remaining_words;
+            done = true;
+        }
 		// we are still in a sub-frame so we need to copy memory down...
-		if (_dma_sub_frame_count == (_dma_cnt_sub_frames_per_frame-2)) {
+		if (done || _dma_sub_frame_count == (_dma_cnt_sub_frames_per_frame-2)) {
 			if ((_dma_state & LCD_SPI_DMA_CONT) == 0) {
 				if (_dma_sub_frame_count & 1) _dma_data[_spi_num]._dmasettings[0].disableOnCompletion();
 				else _dma_data[_spi_num]._dmasettings[1].disableOnCompletion();
@@ -108,19 +115,17 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 
 			}
 		}
-        size_t to_copy = _dma_buffer_size;
-        size_t remaining_words = _count_words - _dma_pixel_index;
-        if (to_copy > remaining_words) {
-            to_copy = remaining_words;
-        }
-		if (_dma_sub_frame_count & 1) {
+
+        if (_dma_sub_frame_count & 1) {
 			memcpy(_dma_data[_spi_num]._dma_buffer1, &_buffer[_dma_pixel_index], to_copy*2);
 		} else {			
 			memcpy(_dma_data[_spi_num]._dma_buffer2, &_buffer[_dma_pixel_index], to_copy*2);
 		}
 		_dma_pixel_index += to_copy;
-        while (_dma_pixel_index >= (_count_words))
-            _dma_pixel_index -= _count_words;  // we will wrap around
+        while (_dma_pixel_index >= (_count_words)) {
+           _dma_pixel_index =0;//-= _count_words;  // we will wrap around
+           still_more_dma = false;
+        }
 	}
 	_dma_data[_spi_num]._dmatx.clearInterrupt();
 	_dma_data[_spi_num]._dmatx.clearComplete();
@@ -128,12 +133,16 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 }
 
 
-void lcd_spi_driver_t4::init_dma_settings(void) {
+bool lcd_spi_driver_t4::init_dma_settings(void) {
     if (_dma_state) {  // should test for init, but...
-        return;        // we already init this.
+        return false;        // we already init this.
     }
+    //printf("Pixels: %lu\n",(unsigned long)_count_words);
     uint8_t dmaTXevent = _spi_hardware->tx_dma_channel;
     _dma_buffer_size = LCD_SPI_DMA_BUFFER_SIZE;
+    if(_dma_buffer_size>_count_words) {
+        _dma_buffer_size = _count_words;
+    }
     _dma_cnt_sub_frames_per_frame = (_count_words + (_dma_buffer_size - 1)) / _dma_buffer_size;
 
     size_t cb = _dma_buffer_size * 2;
@@ -155,7 +164,7 @@ void lcd_spi_driver_t4::init_dma_settings(void) {
     _dma_data[_spi_num]._dmatx.begin(true);
     _dma_data[_spi_num]._dmatx.triggerAtHardwareEvent(dmaTXevent);
     _dma_data[_spi_num]._dmatx = _dma_data[_spi_num]._dmasettings[0];
-
+    
     if (_spi_num == 0)
         _dma_data[_spi_num]._dmatx.attachInterrupt(dma_interrupt);
     else if (_spi_num == 1)
@@ -164,6 +173,7 @@ void lcd_spi_driver_t4::init_dma_settings(void) {
         _dma_data[_spi_num]._dmatx.attachInterrupt(dma_interrupt2);
 
     _dma_state = LCD_SPI_DMA_INIT;
+    return true;
 }
 
 void lcd_spi_driver_t4::wait_transmit_complete(void) {
@@ -333,9 +343,22 @@ bool lcd_spi_driver_t4::flush(int x1, int y1, int x2, int y2, const void* bitmap
     int w = x2-x1+1;
     int h = y2-y1+1;
     _count_words = w*h;
-    
-    init_dma_settings();
+    _dma_pixel_index = 0;
+    if(!init_dma_settings()) {
+        _dma_buffer_size = LCD_SPI_DMA_BUFFER_SIZE;
+        if(_dma_buffer_size>_count_words) {
+            _dma_buffer_size = _count_words;
+        }
+        _dma_cnt_sub_frames_per_frame = (_count_words + (_dma_buffer_size - 1)) / _dma_buffer_size;
+        size_t cb = _dma_buffer_size * 2;
+        if (cb > _count_words * 2) {
+            cb = _count_words * 2;
+        }
+        _dma_data[_spi_num]._dmasettings[0].sourceBuffer(_dma_data[_spi_num]._dma_buffer1, cb);
+        _dma_data[_spi_num]._dmasettings[1].sourceBuffer(_dma_data[_spi_num]._dma_buffer2, cb);
+        
 
+    }
     // Start off remove disable on completion from both...
     // it will be the ISR that disables it...
     _dma_data[_spi_num]._dmasettings[0].TCD->CSR &= ~(DMA_TCD_CSR_DREQ);
