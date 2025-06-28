@@ -23,8 +23,6 @@ typedef void (*lcd_spi_on_flush_complete_callback_t)(void *state);
 typedef struct {
     DMASetting _dmasettings[2];
     DMAChannel _dmatx;
-    uint16_t _dma_buffer1[LCD_SPI_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
-    uint16_t _dma_buffer2[LCD_SPI_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
 } lcd_spi_dma_data_t;
 
 class lcd_spi_driver_t4 {
