@@ -57,7 +57,8 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 		#if defined(DEBUG_ASYNC_UPDATE)
 		Serial.println("*");
 		#endif
-		// We completed a frame. 
+		
+        // We completed a frame. 
 		_dma_frame_count++;
 		// See if we are logically done
 		if (_dma_state & LCD_SPI_DMA_FINISH) {
@@ -112,7 +113,6 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 				Serial.println("!");
 				#endif
 				_dma_state |= LCD_SPI_DMA_FINISH;  // let system know we set the finished state
-
 			}
 		}
 
@@ -124,7 +124,7 @@ void lcd_spi_driver_t4::process_dma_interrupt(void) {
 		_dma_pixel_index += to_copy;
         while (_dma_pixel_index >= (_count_words)) {
            _dma_pixel_index =0;//-= _count_words;  // we will wrap around
-           still_more_dma = false;
+           //still_more_dma = false;
         }
 	}
 	_dma_data[_spi_num]._dmatx.clearInterrupt();
@@ -143,7 +143,7 @@ bool lcd_spi_driver_t4::init_dma_settings(void) {
     if(_dma_buffer_size>_count_words) {
         _dma_buffer_size = _count_words;
     }
-    _dma_cnt_sub_frames_per_frame = (_count_words + (_dma_buffer_size - 1)) / _dma_buffer_size;
+    _dma_cnt_sub_frames_per_frame = _count_words+(_dma_buffer_size-1) / _dma_buffer_size;
 
     size_t cb = _dma_buffer_size * 2;
     if (cb > _count_words * 2) {
@@ -333,7 +333,7 @@ void lcd_spi_driver_t4::on_flush_complete_callback(lcd_spi_on_flush_complete_cal
     this->_on_transfer_complete = callback;
     _on_transfer_complete_state = state;
 }
-bool lcd_spi_driver_t4::flush(int x1, int y1, int x2, int y2, const void* bitmap) {
+bool lcd_spi_driver_t4::flush_async(int x1, int y1, int x2, int y2, const void* bitmap) {
     // Don't start one if already active.
     if (_dma_state & LCD_SPI_DMA_ACTIVE) {
         Serial.println("DMA IN PROGRESS");
@@ -401,7 +401,28 @@ bool lcd_spi_driver_t4::flush(int x1, int y1, int x2, int y2, const void* bitmap
     _dma_state |= LCD_SPI_DMA_ACTIVE;
     return true;
 }
-
+bool lcd_spi_driver_t4::flush(int x1, int y1, int x2, int y2, const void* bitmap) {
+    if (_dma_state & LCD_SPI_DMA_ACTIVE) {
+        Serial.println("DMA IN PROGRESS");
+        return false;
+    }
+    size_t size = (x2-x1+1)*(y2-y1+1);
+    const uint16_t* p = (const uint16_t*)bitmap;
+    begin_transaction();
+    write_address_window(x1,y1,x2,y2);
+    while(size>1) {
+        write_data16(*(p++));
+        --size;
+    }
+    if(size) {
+        write_data16_last(*p);
+    }
+    end_transaction();
+    if(_on_transfer_complete!=nullptr) {
+        _on_transfer_complete(_on_transfer_complete_state);
+    }
+    return true;
+}
 void lcd_spi_driver_t4::rotation(int value) {
     _rotation = value;
     set_rotation(value);
