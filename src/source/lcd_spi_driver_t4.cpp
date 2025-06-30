@@ -266,7 +266,7 @@ void lcd_spi_driver_t4::on_flush_complete_callback(lcd_spi_on_flush_complete_cal
     this->_on_transfer_complete = callback;
     _on_transfer_complete_state = state;
 }
-bool lcd_spi_driver_t4::flush_async(int x1, int y1, int x2, int y2, const void* bitmap) {
+bool lcd_spi_driver_t4::flush_async(int x1, int y1, int x2, int y2, const void* bitmap, bool flush_cache) {
     // Don't start one if already active.
     if (_dma_state & LCD_SPI_DMA_ACTIVE) {
         Serial.println("DMA IN PROGRESS");
@@ -277,6 +277,9 @@ bool lcd_spi_driver_t4::flush_async(int x1, int y1, int x2, int y2, const void* 
     int h = y2-y1+1;
     _count_words = w*h;
     _dma_pixel_index = 0;
+    if(flush_cache) {
+        arm_dcache_flush((void*)_buffer,_count_words*2);
+    }
     if(!init_dma_settings()) {
         size_t cb = _dma_buffer_size * 2;
         if (cb > _count_words * 2) {
