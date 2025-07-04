@@ -4,7 +4,7 @@ A DMA enabled SPI driver for LCDs. This driver provides shared code for implemen
 
 ## To implement a driver:
 
-Publicly derive from lcd_spi_driver and implement three methods (outlined below)
+Publicly derive from lcd_spi_driver_t4 and implement three methods (outlined below)
 
 See https://github.com/codewitch-honey-crisis/ssd1351_t4, https://github.com/codewitch-honey-crisis/st7789_t4, and https://github.com/codewitch-honey-crisis/ili9341_t4 for example implementations.
 
